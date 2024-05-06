@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
-func WalkDir(dir string, fileSize chan<- int64) {
+func WalkDir(dir string, fileSize chan<- int64, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for _, entry := range dirents(dir) {
 		if entry.IsDir() {
+			wg.Add(1)
 			subdir := filepath.Join(dir, entry.Name())
-			WalkDir(subdir, fileSize)
+			go WalkDir(subdir, fileSize, wg)
 		} else {
 			fileInfo, err := entry.Info()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "walkdir: %v\n", err)
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			}
 			fileSize <- fileInfo.Size()
 		}
@@ -27,7 +30,7 @@ func WalkDir(dir string, fileSize chan<- int64) {
 func dirents(dir string) []os.DirEntry {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "walkdir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return nil
 	}
 	return entries
@@ -47,10 +50,14 @@ func main() {
 	}
 
 	fileSizes := make(chan int64)
+
+	var wg sync.WaitGroup
+	for _, root := range roots {
+		wg.Add(1)
+		go WalkDir(root, fileSizes, &wg)
+	}
 	go func() {
-		for _, root := range roots {
-			WalkDir(root, fileSizes)
-		}
+		wg.Wait()
 		close(fileSizes)
 	}()
 
