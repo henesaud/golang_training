@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+var verbose = flag.Bool("v", false, "show verbose progress")
+
+// counting semaphore to limit # of files
+var sema = make(chan struct{}, 20)
+
 func WalkDir(dir string, fileSize chan<- int64, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for _, entry := range dirents(dir) {
@@ -23,11 +28,12 @@ func WalkDir(dir string, fileSize chan<- int64, wg *sync.WaitGroup) {
 			}
 			fileSize <- fileInfo.Size()
 		}
-
 	}
 }
 
 func dirents(dir string) []os.DirEntry {
+	sema <- struct{}{}
+	defer func() { <-sema }()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -39,8 +45,6 @@ func dirents(dir string) []os.DirEntry {
 func PrintDiskUsage(nFiles, nBytes int64) {
 	fmt.Printf("%d files, %.1f GB \n", nFiles, float64(nBytes)/1e9)
 }
-
-var verbose = flag.Bool("v", false, "show verbose progress")
 
 func main() {
 	flag.Parse()
@@ -63,7 +67,7 @@ func main() {
 
 	var tick <-chan time.Time
 	if *verbose {
-		tick = time.Tick(500 * time.Millisecond)
+		tick = time.Tick(time.Second)
 	}
 
 	var nFiles, nBytes int64
@@ -79,7 +83,6 @@ loop:
 		case <-tick:
 			PrintDiskUsage(nFiles, nBytes)
 		}
-		PrintDiskUsage(nFiles, nBytes)
 	}
-
+	PrintDiskUsage(nFiles, nBytes)
 }
